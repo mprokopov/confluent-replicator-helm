@@ -1,0 +1,48 @@
+replicator:
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+  groupId: replicator-dev-migration
+
+  source:
+    # Existing source cluster
+    bootstrapServers: SOURCE_BOOTSTRAP_SERVER:9092
+    saslMechanism: PLAIN
+    securityProtocol: SASL_SSL
+    ssmPath: /path/to/source/api-credentials
+    ssmRawEndpointPath: /path/to/source/bootstrap-endpoint
+
+  destination:
+    # New destination cluster
+    bootstrapServers: DESTINATION_BOOTSTRAP_SERVER:9092
+    saslMechanism: PLAIN
+    securityProtocol: SASL_SSL
+    ssmPath: /path/to/destination/api-credentials
+    ssmRawEndpointPath: /path/to/destination/bootstrap-endpoint
+
+  connector:
+    forward:
+      enabled: true
+      name: replicator-dev-forward
+      topicWhitelist: ".*"
+      topicBlacklist: "_.*,connect-.*"
+      topicRenameFormat: "${topic}"
+      tasksMax: "1"
+      # Translate consumer offsets every 30s for faster verification
+      offsetTranslatorTasksMax: "1"
+      offsetTranslatorBatchPeriodMs: "30000"
+
+serviceAccount:
+  name: confluent-replicator
+  roleArn: arn:aws:iam::ACCOUNT_ID:role/confluent-replicator-irsa
+
+externalSecrets:
+  enabled: true
+  secretStoreName: confluent-replicator-ssm

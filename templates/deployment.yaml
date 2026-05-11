@@ -1,0 +1,198 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: confluent-replicator
+  labels:
+    app: confluent-replicator
+spec:
+  replicas: {{ .Values.replicator.replicas }}
+  selector:
+    matchLabels:
+      app: confluent-replicator
+  template:
+    metadata:
+      labels:
+        app: confluent-replicator
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: replicator
+          image: "{{ .Values.replicator.image.repository }}:{{ .Values.replicator.image.tag }}"
+          imagePullPolicy: {{ .Values.replicator.image.pullPolicy }}
+          ports:
+            - containerPort: 8083
+              name: rest
+          env:
+            - name: CONNECT_BOOTSTRAP_SERVERS
+              value: "{{ .Values.replicator.destination.bootstrapServers }}"
+            - name: CONNECT_REST_PORT
+              value: "8083"
+            - name: CONNECT_REST_ADVERTISED_HOST_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CONNECT_GROUP_ID
+              value: "{{ .Values.replicator.groupId }}"
+            - name: CONNECT_CONFIG_STORAGE_TOPIC
+              value: "connect-configs"
+            - name: CONNECT_OFFSET_STORAGE_TOPIC
+              value: "connect-offsets"
+            - name: CONNECT_STATUS_STORAGE_TOPIC
+              value: "connect-status"
+            - name: CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR
+              value: "3"
+            - name: CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR
+              value: "3"
+            - name: CONNECT_STATUS_STORAGE_REPLICATION_FACTOR
+              value: "3"
+            - name: CONNECT_KEY_CONVERTER
+              value: "org.apache.kafka.connect.converters.ByteArrayConverter"
+            - name: CONNECT_VALUE_CONVERTER
+              value: "org.apache.kafka.connect.converters.ByteArrayConverter"
+            - name: CONNECT_PLUGIN_PATH
+              value: "/usr/share/java"
+            - name: CONNECT_SECURITY_PROTOCOL
+              value: "{{ .Values.replicator.destination.securityProtocol }}"
+            - name: CONNECT_SASL_MECHANISM
+              value: "{{ .Values.replicator.destination.saslMechanism }}"
+            - name: CONNECT_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
+              value: "https"
+            - name: CONNECT_PRODUCER_SECURITY_PROTOCOL
+              value: "{{ .Values.replicator.destination.securityProtocol }}"
+            - name: CONNECT_PRODUCER_SASL_MECHANISM
+              value: "{{ .Values.replicator.destination.saslMechanism }}"
+            - name: CONNECT_CONSUMER_SECURITY_PROTOCOL
+              value: "{{ .Values.replicator.destination.securityProtocol }}"
+            - name: CONNECT_CONSUMER_SASL_MECHANISM
+              value: "{{ .Values.replicator.destination.saslMechanism }}"
+            - name: SRC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.replicator.credentialsSecretName }}
+                  key: src-api-key
+            - name: SRC_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.replicator.credentialsSecretName }}
+                  key: src-api-secret
+            - name: DST_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.replicator.credentialsSecretName }}
+                  key: dst-api-key
+            - name: DST_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.replicator.credentialsSecretName }}
+                  key: dst-api-secret
+            - name: CONNECT_SASL_JAAS_CONFIG
+              value: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="$(DST_API_KEY)" password="$(DST_API_SECRET)";'
+            - name: CONNECT_PRODUCER_SASL_JAAS_CONFIG
+              value: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="$(DST_API_KEY)" password="$(DST_API_SECRET)";'
+            - name: CONNECT_CONSUMER_SASL_JAAS_CONFIG
+              value: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="$(DST_API_KEY)" password="$(DST_API_SECRET)";'
+          volumeMounts:
+            - name: config
+              mountPath: /etc/replicator
+              readOnly: true
+          resources:
+            {{- toYaml .Values.replicator.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /
+              port: rest
+            periodSeconds: 10
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /
+              port: rest
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /connectors
+              port: rest
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: confluent-replicator-config
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: replicator-submit-connectors
+  labels:
+    app: confluent-replicator
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: submit-connectors
+          image: alpine:3.19
+          env:
+            - name: SRC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.replicator.credentialsSecretName }}
+                  key: src-api-key
+            - name: SRC_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.replicator.credentialsSecretName }}
+                  key: src-api-secret
+            - name: DST_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.replicator.credentialsSecretName }}
+                  key: dst-api-key
+            - name: DST_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.replicator.credentialsSecretName }}
+                  key: dst-api-secret
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache curl gettext jq > /dev/null 2>&1
+
+              echo "Waiting for Connect REST API..."
+              until curl -sf http://confluent-replicator:8083/ > /dev/null 2>&1; do
+                echo "Connect not ready, retrying in 10s..."
+                sleep 10
+              done
+              echo "Connect is ready."
+
+              CONNECTOR_NAME="{{ .Values.replicator.connector.forward.name }}"
+              CONFIG_JSON=$(envsubst < /etc/replicator/replicator-forward.json)
+
+              # Check if connector already exists
+              if curl -sf http://confluent-replicator:8083/connectors/$CONNECTOR_NAME > /dev/null 2>&1; then
+                echo "Updating existing connector $CONNECTOR_NAME..."
+                echo "$CONFIG_JSON" | jq '.config' | \
+                  curl -sf -X PUT http://confluent-replicator:8083/connectors/$CONNECTOR_NAME/config \
+                    -H "Content-Type: application/json" -d @-
+              else
+                echo "Creating connector $CONNECTOR_NAME..."
+                echo "$CONFIG_JSON" | \
+                  curl -sf -X POST http://confluent-replicator:8083/connectors \
+                    -H "Content-Type: application/json" -d @-
+              fi
+              echo ""
+
+              echo "Connectors:"
+              curl -s http://confluent-replicator:8083/connectors
+          volumeMounts:
+            - name: config
+              mountPath: /etc/replicator
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: confluent-replicator-config

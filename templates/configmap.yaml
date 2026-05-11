@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: confluent-replicator-config
+  labels:
+    app: confluent-replicator
+data:
+  replicator-forward.json: |
+    {
+      "name": "{{ .Values.replicator.connector.forward.name }}",
+      "config": {
+        "connector.class": "io.confluent.connect.replicator.ReplicatorSourceConnector",
+        "topic.whitelist": "{{ .Values.replicator.connector.forward.topicWhitelist }}",
+        "topic.blacklist": "{{ .Values.replicator.connector.forward.topicBlacklist }}",
+        "topic.rename.format": "{{ .Values.replicator.connector.forward.topicRenameFormat }}",
+        "key.converter": "io.confluent.connect.replicator.util.ByteArrayConverter",
+        "value.converter": "io.confluent.connect.replicator.util.ByteArrayConverter",
+        "src.kafka.bootstrap.servers": "{{ .Values.replicator.source.bootstrapServers }}",
+        "src.kafka.security.protocol": "{{ .Values.replicator.source.securityProtocol }}",
+        "src.kafka.sasl.mechanism": "{{ .Values.replicator.source.saslMechanism }}",
+        "src.kafka.sasl.jaas.config": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"${SRC_API_KEY}\" password=\"${SRC_API_SECRET}\";",
+        "dest.kafka.bootstrap.servers": "{{ .Values.replicator.destination.bootstrapServers }}",
+        "dest.kafka.security.protocol": "{{ .Values.replicator.destination.securityProtocol }}",
+        "dest.kafka.sasl.mechanism": "{{ .Values.replicator.destination.saslMechanism }}",
+        "dest.kafka.sasl.jaas.config": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"${DST_API_KEY}\" password=\"${DST_API_SECRET}\";",
+        "src.consumer.group.id": "replicator-forward",
+        "tasks.max": "{{ .Values.replicator.connector.forward.tasksMax }}",
+        "confluent.topic.replication.factor": "3",
+        "offset.translator.tasks.max": "{{ .Values.replicator.connector.forward.offsetTranslatorTasksMax }}",
+        "offset.translator.batch.period.ms": "{{ .Values.replicator.connector.forward.offsetTranslatorBatchPeriodMs }}"
+      }
+    }

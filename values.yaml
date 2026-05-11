@@ -1,0 +1,55 @@
+replicator:
+  image:
+    repository: confluentinc/cp-enterprise-replicator
+    tag: "7.7.1"
+    pullPolicy: IfNotPresent
+
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+  groupId: replicator-dev-migration
+
+  source:
+    bootstrapServers: ""
+    saslMechanism: PLAIN
+    securityProtocol: SASL_SSL
+    # SSM parameter paths
+    ssmPath: ""
+    ssmRawEndpointPath: ""
+
+  destination:
+    bootstrapServers: ""
+    saslMechanism: PLAIN
+    securityProtocol: SASL_SSL
+    ssmPath: ""
+    ssmRawEndpointPath: ""
+
+  connector:
+    forward:
+      enabled: true
+      name: replicator-forward
+      topicWhitelist: ".*"
+      topicBlacklist: "_.*,connect-.*"
+      topicRenameFormat: "${topic}"
+      tasksMax: "1"
+      # Offset translation: copies consumer group offsets from source → destination
+      offsetTranslatorTasksMax: "1"
+      offsetTranslatorBatchPeriodMs: "30000"
+
+  credentialsSecretName: confluent-replicator-credentials
+
+serviceAccount:
+  name: confluent-replicator
+  # IRSA role ARN for accessing SSM parameters
+  roleArn: ""
+
+externalSecrets:
+  enabled: true
+  secretStoreName: confluent-replicator-ssm
